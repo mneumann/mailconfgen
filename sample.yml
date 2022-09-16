@@ -25,6 +25,7 @@ domains:
 services:
   dovecot:
     logging: false
+    debug: false
 
 dkimsign:
   selector: 20200816

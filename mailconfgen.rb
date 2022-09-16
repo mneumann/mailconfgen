@@ -170,12 +170,12 @@ class TemplateModel
   end
 
   def confval!(key)
-    value = _confval(key)
+    value = confval(key)
     raise "Value is nil (key: #{key})" if value.nil?
     value
   end
 
-  private def _confval(key)
+  def confval(key)
     value = @conf.data
     for part in key.split('.')
       raise "No value for key #{key} (part: #{part}, value: #{value})" unless value.is_a? Hash

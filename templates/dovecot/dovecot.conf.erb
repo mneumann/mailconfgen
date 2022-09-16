@@ -15,6 +15,14 @@ debug_log_path = /dev/null
 info_log_path = /dev/null
 <% end %>
 
+<% if confval 'services.dovecot.debug' %>
+auth_verbose = yes
+auth_debug = yes
+auth_verbose_passwords = yes
+mail_debug = yes
+verbose_ssl = yes
+<% end %>
+
 ssl_min_protocol = TLSv1.2
 ssl_prefer_server_ciphers = yes
 
