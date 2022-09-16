@@ -171,19 +171,13 @@ class MailConfGen
 
   def initialize(conf:)
     @files = {}
-    @root = nil
     @filemap = {}
     @conf = conf
   end
 
-  def with_root(root)
-    @root = root
-    self
-  end
-
-  def map_files_relative_to_root(*files)
-    raise unless @root
-    relative_to_root = -> f { File.join(@root, f) }
+  def map_files_relative_to_root(*files, root:)
+    raise unless root
+    relative_to_root = -> f { File.join(root, f) }
 
     for file in files
       @filemap[file] = relative_to_root
@@ -234,13 +228,13 @@ end
 if __FILE__ == $0
   MailConfGen
     .from_yaml_conf("sample.yml", "sample-creds.yml")
-    .with_root('/etc/smtpd')
     .map_files_relative_to_root(
-      "smtpd.conf",
-      "allowed-recipients",
-      "virtual-users",
-      "virtual-user-base",
-      "passwd")
+      "smtpd/smtpd.conf",
+      "smtpd/allowed-recipients",
+      "smtpd/virtual-users",
+      "smtpd/virtual-user-base",
+      "smtpd/passwd",
+      root: '/etc')
     .generate(service: 'smtpd')
     .write_files_relative_to!('_stage')
 end
