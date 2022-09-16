@@ -56,8 +56,8 @@ class Account
   end
 
   def name() = @name
-  def uid() = @data['uid'] || raise
-  def gid() = @data['gid'] || raise
+  def uid() = Integer(@data['uid'] || raise).to_s
+  def gid() = Integer(@data['gid'] || raise).to_s
   def home() = @data['home'] || raise
 
   def cred(for_service:)
