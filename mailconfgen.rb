@@ -113,10 +113,82 @@ class ConfFile
   end
 end
 
-class ConfGen
-  def initialize(filemap:)
+class TemplateModel
+  VERSION = '0.0.1'
+
+  def initialize(conf, gen)
+    @conf, @gen = conf, gen
+    @defines_file = nil
+  end
+
+  def get_binding
+    binding
+  end
+
+  def defines_file(filename=nil)
+    if filename
+      @defines_file = filename
+    else
+      @defines_file
+    end
+  end
+
+  def absolute_file_path(filename)
+    @gen.file(filename).absolute_path
+  end
+
+  def requires_version(version)
+    raise "Template / Generator version mismatch" unless version == VERSION
+  end
+
+  def opensmtpd_filter_dkimsign_params
+    dkimsign_params = @conf.domains.map {|dom| "-d #{dom}"}
+    dkimsign_params << "-s #{confval!('dkimsign.selector')}"
+    dkimsign_params << "-k #{confval!('dkimsign.key')}"
+    dkimsign_params.join(" ")
+  end
+
+  def confval!(key)
+    value = _confval(key)
+    raise "Value is nil (key: #{key})" if value.nil?
+    value
+  end
+
+  private def _confval(key)
+    value = @conf.data
+    for part in key.split('.')
+      raise "No value for key #{key} (part: #{part}, value: #{value})" unless value.is_a? Hash
+      value = value[part]
+    end
+    value
+  end
+end
+
+class MailConfGen
+  def self.from_yaml_conf(*files)
+    new(conf: MailConf.from_yaml_files(*files))
+  end
+
+  def initialize(conf:)
     @files = {}
-    @filemap = filemap
+    @root = nil
+    @filemap = {}
+    @conf = conf
+  end
+
+  def with_root(root)
+    @root = root
+    self
+  end
+
+  def map_files_relative_to_root(*files)
+    raise unless @root
+    relative_to_root = -> f { File.join(@root, f) }
+
+    for file in files
+      @filemap[file] = relative_to_root
+    end
+    self
   end
 
   def file(filename)
@@ -136,26 +208,9 @@ class ConfGen
       raise "File #{filename} not allowed"
     end
   end
-end
 
-# Generator for OpenSMTPd `smtpd.conf` and related files. 
-class SmtpdConfGen < ConfGen
-  def initialize(conf:, root:)
-    relative_to_root = -> f { File.join(root, f) }
-
-    filemap = {
-      "smtpd.conf" => relative_to_root,
-      "allowed-recipients" => relative_to_root,
-      "virtual-users" => relative_to_root,
-      "virtual-user-base" => relative_to_root,
-      "passwd" => relative_to_root,
-    }
-    super(filemap: filemap)
-    @conf = conf
-  end
-
-  def generate
-    Dir['templates/smtpd/*.erb'].each {|t| run_template(template: t)}
+  def generate(service:)
+    Dir["templates/#{service}/*.erb"].each {|t| run_template(template: t)}
     self
   end
 
@@ -174,64 +229,18 @@ class SmtpdConfGen < ConfGen
     result = ERB.new(File.read(template), trim_mode: "-").result(model.get_binding)
     file(model.defines_file || raise).out << result
   end
-
-  class TemplateModel
-    VERSION = '0.0.1'
-
-    def initialize(conf, gen)
-      @conf, @gen = conf, gen
-      @defines_file = nil
-    end
-
-    def get_binding
-      binding
-    end
-
-    def defines_file(filename=nil)
-      if filename
-        @defines_file = filename
-      else
-        @defines_file
-      end
-    end
-
-    def absolute_file_path(filename)
-      @gen.file(filename).absolute_path
-    end
-
-    def requires_version(version)
-      raise "Template / Generator version mismatch" unless version == VERSION
-    end
-
-    def opensmtpd_filter_dkimsign_params
-      dkimsign_params = @conf.domains.map {|dom| "-d #{dom}"}
-      dkimsign_params << "-s #{confval!('dkimsign.selector')}"
-      dkimsign_params << "-k #{confval!('dkimsign.key')}"
-      dkimsign_params.join(" ")
-    end
-
-    def confval!(key)
-      value = _confval(key)
-      raise "Value is nil (key: #{key})" if value.nil?
-      value
-    end
-
-    private def _confval(key)
-      value = @conf.data
-      for part in key.split('.')
-        raise "No value for key #{key} (part: #{part}, value: #{value})" unless value.is_a? Hash
-        value = value[part]
-      end
-      value
-    end
-  end
-
 end
 
 if __FILE__ == $0
-  conf = MailConf.from_yaml_files("sample.yml", "sample-creds.yml")
-  SmtpdConfGen
-    .new(conf: conf, root: '/etc/smtpd')
-    .generate
+  MailConfGen
+    .from_yaml_conf("sample.yml", "sample-creds.yml")
+    .with_root('/etc/smtpd')
+    .map_files_relative_to_root(
+      "smtpd.conf",
+      "allowed-recipients",
+      "virtual-users",
+      "virtual-user-base",
+      "passwd")
+    .generate(service: 'smtpd')
     .write_files_relative_to!('_stage')
 end
