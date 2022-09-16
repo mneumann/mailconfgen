@@ -1,13 +1,6 @@
 require 'yaml'
 require 'fileutils'
-
-def error_context(context)
-  begin
-    yield
-  rescue
-    raise "#{context}: #{$!}"
-  end
-end
+require 'erb'
 
 class MailConf
   def self.from_yaml_files(*filenames)
@@ -162,15 +155,6 @@ class SmtpdConfGen < ConfGen
     @conf = conf
   end
 
-  def generate
-    gen_table_allowed_recipients
-    gen_table_passwd
-    gen_table_virtual_users
-    gen_table_virtual_user_base
-    gen_smtpd_conf
-    self
-  end
-
   def write_files_relative_to!(root)
     FileUtils.mkdir_p(root)
     for file in @files.values
@@ -181,135 +165,58 @@ class SmtpdConfGen < ConfGen
     end
   end
 
-  private def gen_smtpd_conf
-    out = file("smtpd.conf").out
-    gen_smtpd_pki(out)
-    gen_smtpd_filters(out)
-    gen_smtpd_tables(out)
-    gen_smtpd_listens(out)
-    gen_smtpd_actions(out)
-    gen_smtpd_matches(out)
+  def generate
+    gen_table_allowed_recipients
+    gen_table_passwd
+    gen_table_virtual_users
+    gen_table_virtual_user_base
+    gen_smtpd_conf(template: 'smtpd.conf.erb')
+    self
   end
 
-  private def gen_smtpd_actions(out)
-    out << decl(<<~'END')
-      action "local"
-        lmtp "/var/run/dovecot/lmtp"
-        virtual <virtual-users>
-        userbase <virtual-user-base>
-      END
-
-    out << decl(<<~"END")
-      action "outbound"
-        relay
-        helo "#{confval! 'server.name'}"
-      END
+  private def gen_smtpd_conf(template:)
+    model = TemplateModel.new(@conf, self)
+    file("smtpd.conf").out << ERB.new(File.read(template)).result(model.get_binding)
   end
 
-  private def gen_smtpd_matches(out)
-    out << decl(<<~"END")
-      match
-        from any
-        for rcpt-to <allowed-recipients>
-        action "local"
-      END
-    out << decl(<<~"END")
-      match
-        from any
-          auth
-        for any
-        action "outbound"
-      END
-  end
+  class TemplateModel
+    VERSION = '0.0.1'
 
-  private def gen_smtpd_pki(out)
-    out << %(pki pki_#{confval! 'server.name'} cert "#{confval! 'server.pki.cert'}")
-    out << %(pki pki_#{confval! 'server.name'} key "#{confval! 'server.pki.key'}")
-    out << "\n"
-  end
-
-  private def gen_smtpd_filters(out)
-    out << decl(<<~'END')
-      filter check_dyndns phase connect match rdns regex
-        { '.*\.dyn\..*', '.*\.dsl\..*' }
-        disconnect "550 no residential connections
-      END
-
-    out << decl(<<~'END')
-      filter check_rdns phase connect match !rdns
-        disconnect "550 no rDNS is so 80s"
-      END
-
-    out << decl(<<~'END')
-      filter check_fcrdns phase connect match !fcrdns
-        disconnect "550 no FCrDNS is so 80s"
-      END
-
-    out << decl(<<~'END')
-      filter senderscore
-        proc-exec "opensmtpd-filter-senderscore -blockBelow 10 -junkBelow 70 -slowFactor 5000"
-      END
-
-    dkimsign_params = @conf.domains.map {|dom| "-d #{dom}"}
-    dkimsign_params << "-s #{confval!('dkimsign.selector')}"
-    dkimsign_params << "-k #{confval!('dkimsign.key')}"
-
-    out << decl(<<~"END")
-      filter dkimsign
-        proc-exec "opensmtpd-filter-dkimsign #{dkimsign_params.join(' ')}"
-        user _dkimsign group _dkimsign
-      END
-
-  end
-
-  private def gen_smtpd_tables(out)
-    for table in %w(allowed-recipients virtual-users virtual-user-base passwd) 
-      out << decl_file_table(table)
+    def requires_version(version)
+      raise "Template / Generator version mismatch" unless version == VERSION
     end
-    out << "\n"
-  end
 
-  private def confval(key)
-    value = @conf.data
-    for part in key.split('.')
-      raise "No value for key #{key} (part: #{part}, value: #{value})" unless value.is_a? Hash
-      value = value[part]
+    def initialize(conf, gen)
+      @conf, @gen = conf, gen
     end
-    value
-  end
 
-  private def confval!(key)
-    value = confval(key)
-    raise "Value is nil (key: #{key})" if value.nil?
-    value
-  end
+    def get_binding
+      binding
+    end
 
-  private def gen_smtpd_listens(out)
-    iface = confval! 'server.iface'
-    name = confval! 'server.name'
-    out << "# Public"
-    out << decl(<<~"END")
-      listen on #{iface}
-        port smtp
-        tls
-        pki pki_#{name}
-        hostname "#{name}"
-        filter { check_dyndns, check_rdns, check_fcrdns, senderscore }
-      END
-    out << "# Auth submission"
-    out << decl(<<~"END")
-      listen on #{iface}
-        port submission
-        tls-require
-        pki pki_#{name}
-        hostname "#{name}"
-        auth <passwd>
-        filter dkimsign
-      END
-  end
+    def file(filename) = @gen.file(filename)
 
-  private def decl_file_table(name)
-    "table #{name} file:#{file(name).absolute_path}"
+    def opensmtpd_filter_dkimsign_params
+      dkimsign_params = @conf.domains.map {|dom| "-d #{dom}"}
+      dkimsign_params << "-s #{confval!('dkimsign.selector')}"
+      dkimsign_params << "-k #{confval!('dkimsign.key')}"
+      dkimsign_params.join(" ")
+    end
+
+    def confval(key)
+      value = @conf.data
+      for part in key.split('.')
+        raise "No value for key #{key} (part: #{part}, value: #{value})" unless value.is_a? Hash
+        value = value[part]
+      end
+      value
+    end
+
+    def confval!(key)
+      value = confval(key)
+      raise "Value is nil (key: #{key})" if value.nil?
+      value
+    end
   end
 
   private def gen_table_allowed_recipients
@@ -346,7 +253,6 @@ class SmtpdConfGen < ConfGen
   private def linify(items)
     items.join("\n")
   end
-
 end
 
 if __FILE__ == $0

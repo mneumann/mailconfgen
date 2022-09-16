@@ -25,5 +25,3 @@ domains:
 dkimsign:
   selector: 20200816
   key: /usr/local/etc/ssl/dkim/alldomains.key
-
-
