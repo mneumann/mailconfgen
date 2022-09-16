@@ -154,6 +154,11 @@ class SmtpdConfGen < ConfGen
     @conf = conf
   end
 
+  def generate
+    Dir['templates/smtpd/*.erb'].each {|t| run_template(template: t)}
+    self
+  end
+
   def write_files_relative_to!(root)
     FileUtils.mkdir_p(root)
     for file in @files.values
@@ -162,15 +167,6 @@ class SmtpdConfGen < ConfGen
       FileUtils.mkdir_p(File.dirname(path))
       File.write(path, data)
     end
-  end
-
-  def generate
-    run_template(template: 'templates/passwd.erb')
-    run_template(template: 'templates/smtpd.conf.erb')
-    run_template(template: 'templates/virtual-users.erb')
-    run_template(template: 'templates/virtual-user-base.erb')
-    run_template(template: 'templates/allowed-recipients.erb')
-    self
   end
 
   private def run_template(template:)
