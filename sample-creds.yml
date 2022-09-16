@@ -1,0 +1,10 @@
+# OpenSMTPd uses SHA256-CRYPT, but without {SCHEMA}
+
+creds:
+  me_at_michaelonroad_de: "{SHA256-CRYPT}$5$LRU9YBYtG0eDmMoP$UagnseDXdUrcSDY5JMJz2GkR/L.6rlP402/5DzTh1z0"
+
+  # Different credentials depending on the service
+  another_account:
+    smtpd: "$6$GCn5aTJiJOLf69L0$JROSjhfiaiXB8BAEnauxy0klpsQdfQl6FDBb6R5bhcnTomKZOhW4aVG6MexuZunLB2vHFYKC70lqD9vr2NzaK0"
+    dovecot: "{BLF-CRYPT}$2y$05$rGDM98akNNkDjA.1wmGIs./svDMoQLLWSiSOg3KG/PMoBsj/d45sm"
+
