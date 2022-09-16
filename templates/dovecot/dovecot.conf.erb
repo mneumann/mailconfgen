@@ -64,3 +64,19 @@ userdb {
   driver = passwd-file
   args = username_format=%u <%= absolute_file_path("dovecot/passwd") %>
 }
+
+namespace inbox {
+  inbox = yes
+
+  mailbox Drafts {
+    auto = subscribe
+  }
+
+  mailbox Sent {
+    auto = subscribe
+  }
+
+  mailbox Trash {
+    auto = subscribe
+  }
+}
