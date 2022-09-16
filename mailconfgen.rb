@@ -2,86 +2,76 @@ require 'yaml'
 require 'fileutils'
 require 'erb'
 
-class MailConf
-  def self.from_yaml_files(*filenames)
-    new(data: {}.merge(*filenames.map {|f| YAML.load_file(f) }))
-  end
+class VirtualUsers
+  include Enumerable
 
-  def initialize(data:)
+  def initialize(data)
     @data = data
   end
 
-  attr_reader :data
-
-  def allowed_recipients
-    @data['domains'].map do |domain, values|
-      (values['addresses'] || []).map {|addr, _| "#{addr}@#{domain}"}
-    end.flatten
-  end
-
-  class VirtualUsers
-    include Enumerable
-
-    def initialize(data)
-      @data = data
-    end
-
-    def each
-      @data['domains'].each do |domain, domaindata|
-        domaindata['addresses'].each do |addr, virtual_users|
-          virtual_users = domaindata['default'] if virtual_users.nil? or virtual_users.empty?
-          virtual_users = [virtual_users] if virtual_users.is_a?(String)
-          virtual_users = virtual_users.map {|vu| validate_virtual_user(vu)}
-          yield "#{addr}@#{domain}", virtual_users
-        end
+  def each
+    @data['domains'].each do |domain, domaindata|
+      domaindata['addresses'].each do |addr, virtual_users|
+        virtual_users = domaindata['default'] if virtual_users.nil? or virtual_users.empty?
+        virtual_users = [virtual_users] if virtual_users.is_a?(String)
+        virtual_users = virtual_users.map {|vu| validate_virtual_user(vu)}
+        yield "#{addr}@#{domain}", virtual_users
       end
     end
+  end
 
-    private def validate_virtual_user(vu)
-      if vu.start_with?("/")
-        vu = vu.delete_prefix("/")
-        # This is an account
-        if @data['accounts'].has_key?(vu)
-          vu
-        else
-          raise "No account found for virtual user alias #{vu}"
-        end
-      else
-        raise unless vu.include?("@")
+  private def validate_virtual_user(vu)
+    if vu.start_with?("/")
+      vu = vu.delete_prefix("/")
+      # This is an account
+      if @data['accounts'].has_key?(vu)
         vu
+      else
+        raise "No account found for virtual user alias #{vu}"
       end
+    else
+      raise unless vu.include?("@")
+      vu
     end
   end
+end
 
-  def accounts
-    @data['accounts']
+class Accounts
+  include Enumerable
+
+  def initialize(data)
+    @data = data
   end
 
-  def domains
-    @data['domains'].keys
+  def each
+    @data['accounts'].each do |name, accountdata|
+      yield Account.new(name: name, data: accountdata, cred: @data['creds'][name])
+    end
+  end
+end
+
+class Account
+  def initialize(name:, data:, cred:)
+    @name, @data, @cred = name, data, cred
   end
 
-  # Returns a mapping of email address -> account/email addresses
-  def virtual_users
-    VirtualUsers.new(@data)
-  end
+  def name() = @name
+  def uid() = @data['uid'] || raise
+  def gid() = @data['gid'] || raise
+  def home() = @data['home'] || raise
 
-  def account_creds(for_service:)
-    @data['accounts'].keys.map {|account|
-      entry = @data['creds'][account]
-      cred = case entry
+  def cred(for_service:)
+      case @cred
       when Hash
-        entry[for_service]
+        validate_account_cred(@cred[for_service], for_service)
       when String
-        entry
+        validate_account_cred(@cred, for_service)
       else
         raise
       end
-      [account, validate_account_cred(cred, for_service)]
-    }.to_h
   end
 
-  def validate_account_cred(cred, for_service)
+  private def validate_account_cred(cred, for_service)
     case for_service
     when "smtpd" 
       if cred.start_with?("{SHA256-CRYPT}")
@@ -100,6 +90,37 @@ class MailConf
     else
       raise "Invalid service #{for_service}"
     end
+  end
+end
+
+class MailConf
+  def self.from_yaml_files(*filenames)
+    new(data: {}.merge(*filenames.map {|f| YAML.load_file(f) }))
+  end
+
+  def initialize(data:)
+    @data = data
+  end
+
+  attr_reader :data
+
+  def allowed_recipients
+    @data['domains'].map do |domain, values|
+      (values['addresses'] || []).map {|addr, _| "#{addr}@#{domain}"}
+    end.flatten
+  end
+
+  def accounts
+    Accounts.new(@data)
+  end
+
+  def domains
+    @data['domains'].keys
+  end
+
+  # Returns a mapping of email address -> account/email addresses
+  def virtual_users
+    VirtualUsers.new(@data)
   end
 end
 
@@ -234,7 +255,10 @@ if __FILE__ == $0
       "smtpd/virtual-users",
       "smtpd/virtual-user-base",
       "smtpd/passwd",
+      "dovecot/dovecot.conf",
+      "dovecot/passwd",
       root: '/etc')
     .generate(service: 'smtpd')
+    .generate(service: 'dovecot')
     .write_files_relative_to!('_stage')
 end

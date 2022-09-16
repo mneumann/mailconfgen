@@ -2,6 +2,6 @@
 <% defines_file 'smtpd/passwd' -%>
 <% requires_version '0.0.1' -%>
 
-<% for account, cred in @conf.account_creds(for_service: 'smtpd') -%>
-<%= account.ljust(30) %> <%= cred %>
+<% for account in @conf.accounts -%>
+<%= account.name.ljust(30) %> <%= account.cred(for_service: 'smtpd') %>
 <% end -%>

@@ -22,6 +22,10 @@ domains:
         - /me_at_michaelonroad_de
         - "important@ntecs.de"
 
+services:
+  dovecot:
+    logging: false
+
 dkimsign:
   selector: 20200816
   key: /usr/local/etc/ssl/dkim/alldomains.key
