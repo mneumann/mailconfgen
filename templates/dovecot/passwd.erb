@@ -3,5 +3,12 @@
 <% requires_version '0.0.1' -%>
 
 <% for account in @conf.accounts -%>
-<%= account.name %>:<%= account.cred(for_service: 'dovecot') %>
+<%= [
+  account.name,
+  account.cred(for_service: 'dovecot'),
+  account.uid,
+  account.gid,
+  '',
+  account.home].join(':')
+  -%>
 <% end -%>
