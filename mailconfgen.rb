@@ -247,18 +247,23 @@ class MailConfGen
 end
 
 if __FILE__ == $0
-  MailConfGen
-    .from_yaml_conf("sample.yml", "sample-creds.yml")
-    .map_files_relative_to_root(
-      "smtpd/smtpd.conf",
-      "smtpd/allowed-recipients",
-      "smtpd/virtual-users",
-      "smtpd/virtual-user-base",
-      "smtpd/passwd",
-      "dovecot/dovecot.conf",
-      "dovecot/passwd",
-      root: '/etc')
-    .generate(service: 'smtpd')
-    .generate(service: 'dovecot')
-    .write_files_relative_to!('_stage')
+  case ARGV.shift
+  when 'generate'
+    MailConfGen
+      .from_yaml_conf(*ARGV)
+      .map_files_relative_to_root(
+        "smtpd/smtpd.conf",
+        "smtpd/allowed-recipients",
+        "smtpd/virtual-users",
+        "smtpd/virtual-user-base",
+        "smtpd/passwd",
+        "dovecot/dovecot.conf",
+        "dovecot/passwd",
+        root: '/etc/mail')
+      .generate(service: 'smtpd')
+      .generate(service: 'dovecot')
+      .write_files_relative_to!('_stage')
+  else
+    raise "Usage: #{$0} generate [*.yml]"
+  end
 end
