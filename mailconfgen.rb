@@ -13,7 +13,7 @@ class MailConf
 
   attr_reader :data
 
-  def list_allowed_recipients
+  def allowed_recipients
     @data['domains'].map do |domain, values|
       (values['addresses'] || []).map {|addr, _| "#{addr}@#{domain}"}
     end.flatten
@@ -66,7 +66,7 @@ class MailConf
     VirtualUsers.new(@data)
   end
 
-  def list_account_creds(for_service:)
+  def account_creds(for_service:)
     @data['accounts'].keys.map {|account|
       entry = @data['creds'][account]
       cred = case entry
@@ -140,8 +140,7 @@ end
 
 # Generator for OpenSMTPd `smtpd.conf` and related files. 
 class SmtpdConfGen < ConfGen
-  def initialize(conf:)
-    root = "/etc/smtpd"
+  def initialize(conf:, root:)
     relative_to_root = -> f { File.join(root, f) }
 
     filemap = {
@@ -166,35 +165,47 @@ class SmtpdConfGen < ConfGen
   end
 
   def generate
-    gen_table_allowed_recipients
-    gen_table_passwd
-    gen_table_virtual_users
-    gen_table_virtual_user_base
-    gen_smtpd_conf(template: 'smtpd.conf.erb')
+    run_template(template: 'templates/passwd.erb')
+    run_template(template: 'templates/smtpd.conf.erb')
+    run_template(template: 'templates/virtual-users.erb')
+    run_template(template: 'templates/virtual-user-base.erb')
+    run_template(template: 'templates/allowed-recipients.erb')
     self
   end
 
-  private def gen_smtpd_conf(template:)
+  private def run_template(template:)
     model = TemplateModel.new(@conf, self)
-    file("smtpd.conf").out << ERB.new(File.read(template)).result(model.get_binding)
+    result = ERB.new(File.read(template), trim_mode: "-").result(model.get_binding)
+    file(model.defines_file || raise).out << result
   end
 
   class TemplateModel
     VERSION = '0.0.1'
 
-    def requires_version(version)
-      raise "Template / Generator version mismatch" unless version == VERSION
-    end
-
     def initialize(conf, gen)
       @conf, @gen = conf, gen
+      @defines_file = nil
     end
 
     def get_binding
       binding
     end
 
-    def file(filename) = @gen.file(filename)
+    def defines_file(filename=nil)
+      if filename
+        @defines_file = filename
+      else
+        @defines_file
+      end
+    end
+
+    def absolute_file_path(filename)
+      @gen.file(filename).absolute_path
+    end
+
+    def requires_version(version)
+      raise "Template / Generator version mismatch" unless version == VERSION
+    end
 
     def opensmtpd_filter_dkimsign_params
       dkimsign_params = @conf.domains.map {|dom| "-d #{dom}"}
@@ -203,7 +214,13 @@ class SmtpdConfGen < ConfGen
       dkimsign_params.join(" ")
     end
 
-    def confval(key)
+    def confval!(key)
+      value = _confval(key)
+      raise "Value is nil (key: #{key})" if value.nil?
+      value
+    end
+
+    private def _confval(key)
       value = @conf.data
       for part in key.split('.')
         raise "No value for key #{key} (part: #{part}, value: #{value})" unless value.is_a? Hash
@@ -211,54 +228,14 @@ class SmtpdConfGen < ConfGen
       end
       value
     end
-
-    def confval!(key)
-      value = confval(key)
-      raise "Value is nil (key: #{key})" if value.nil?
-      value
-    end
   end
 
-  private def gen_table_allowed_recipients
-    file("allowed-recipients").out << table_list(@conf.list_allowed_recipients)
-  end
-
-  private def gen_table_passwd
-    data = @conf.list_account_creds(for_service: "smtpd")
-    file("passwd").out << table_map(data)
-  end
-
-  private def gen_table_virtual_users
-    data = @conf.virtual_users.to_h.transform_values{|addrs| addrs.join(",") }
-    file("virtual-users").out << table_map(data)
-  end
-
-  private def gen_table_virtual_user_base
-    data = @conf.accounts.transform_values {|account| account.values_at('uid', 'gid', 'home').join(":") }
-    file("virtual-user-base").out << table_map(data)
-  end
-
-  private def decl(s)
-    s.split("\n").join(" \\\n ") + "\n"
-  end
-
-  private def table_list(values)
-    linify(values)
-  end
-
-  private def table_map(pairs)
-    linify(pairs.map {|k,v| [k,v].join("\t")})
-  end
-
-  private def linify(items)
-    items.join("\n")
-  end
 end
 
 if __FILE__ == $0
   conf = MailConf.from_yaml_files("sample.yml", "sample-creds.yml")
   SmtpdConfGen
-    .new(conf: conf)
+    .new(conf: conf, root: '/etc/smtpd')
     .generate
     .write_files_relative_to!('_stage')
 end
